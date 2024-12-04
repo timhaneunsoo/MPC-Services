@@ -56,7 +56,7 @@ struct SetListView: View {
                                     Text("View Music Sheets")
                                         .padding()
                                         .frame(maxWidth: .infinity)
-                                        .background(Color.accentColor)
+                                        .background(Color.blue)
                                         .foregroundColor(.white)
                                         .cornerRadius(8)
                                 }
