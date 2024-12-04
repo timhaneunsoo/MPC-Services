@@ -18,7 +18,7 @@ func generateAccessToken(completion: @escaping (String?) -> Void) {
     let now = Int(Date().timeIntervalSince1970)
     let claims = GoogleJWTClaims(
         iss: clientEmail,
-        scope: "https://www.googleapis.com/auth/drive.readonly",
+        scope: "https://www.googleapis.com/auth/drive",
         aud: "https://oauth2.googleapis.com/token",
         exp: now + 3600,
         iat: now

@@ -11,61 +11,75 @@ struct SongView: View {
     @State private var accessToken: String?
     @State private var errorMessage = ""
     @State private var isSongPickerVisible = false
+    @State private var isLoading = false // Loading state
 
     private let db = Firestore.firestore()
     private let currentWeekID = "currentWeekID" // Replace with actual logic to fetch the current week ID
     private let folderID = "1wOvjYjrYFtKUjArslyV3kcBPymlKddPB" // Replace with your Google Drive folder ID.
 
     var body: some View {
-        VStack {
-            Text("This Week's Songs")
-                .font(.largeTitle)
-                .padding()
-                .bold()
-
-            // Song List with Reordering and Deleting
-            List {
-                ForEach(songOrder, id: \.self) { song in
-                    HStack {
-                        Text(song)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Button(action: {
-                            removeSong(song)
-                        }) {
-                            Image(systemName: "trash")
-                                .foregroundColor(.red)
-                        }
-                        .buttonStyle(BorderlessButtonStyle())
-                    }
-                }
-                .onMove(perform: moveSong) // Enable reordering
-            }
-            .listStyle(InsetGroupedListStyle())
-            .environment(\.editMode, .constant(.active)) // Force edit mode for drag handles
-
-            // Add New Song Button
-            Button(action: {
-                fetchAccessToken {
-                    isSongPickerVisible = true
-                }
-            }) {
-                Text("Add Song from Song Sheets")
-                    .frame(maxWidth: .infinity)
+        ZStack {
+            VStack {
+                Text("This Week's Songs")
+                    .font(.largeTitle)
                     .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
+                    .bold()
+
+                // Song List with Reordering and Deleting
+                List {
+                    ForEach(songOrder, id: \.self) { song in
+                        HStack {
+                            Text(song)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Button(action: {
+                                removeSong(song)
+                            }) {
+                                Image(systemName: "trash")
+                                    .foregroundColor(.red)
+                            }
+                            .buttonStyle(BorderlessButtonStyle())
+                        }
+                    }
+                    .onMove(perform: moveSong) // Enable reordering
+                }
+                .listStyle(InsetGroupedListStyle())
+                .environment(\.editMode, .constant(.active)) // Force edit mode for drag handles
+
+                // Add New Song Button
+                Button(action: {
+                    fetchAccessToken {
+                        isSongPickerVisible = true
+                    }
+                }) {
+                    Text("Add Song from Song Sheets")
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                }
+                .padding()
+
+                // Error Message
+                if !errorMessage.isEmpty {
+                    Text(errorMessage)
+                        .foregroundColor(.red)
+                        .padding()
+                }
             }
             .padding()
 
-            // Error Message
-            if !errorMessage.isEmpty {
-                Text(errorMessage)
-                    .foregroundColor(.red)
-                    .padding()
+            // Loading Indicator
+            if isLoading {
+                VStack {
+                    ProgressView("Loading...")
+                        .padding()
+                        .background(Color(.systemBackground))
+                        .cornerRadius(10)
+                        .shadow(radius: 5)
+                }
             }
         }
-        .padding()
         .onAppear(perform: fetchSongOrder)
         .sheet(isPresented: $isSongPickerVisible) {
             if let accessToken = accessToken {
@@ -86,7 +100,9 @@ struct SongView: View {
 
     // Fetch Song Order from Firestore
     private func fetchSongOrder() {
+        isLoading = true // Start loading
         db.collection("weekly_set").document(currentWeekID).getDocument { snapshot, error in
+            defer { isLoading = false } // Stop loading after the operation
             if let error = error {
                 self.errorMessage = "Error fetching song order: \(error.localizedDescription)"
                 return
@@ -101,6 +117,7 @@ struct SongView: View {
     // Add a New Song
     private func addSong(from file: GDriveFile) {
         guard !file.name.isEmpty else { return }
+        isLoading = true // Start loading
         songOrder.append(file.name)
         updateFirestore()
     }
@@ -108,6 +125,7 @@ struct SongView: View {
     // Remove a Song
     private func removeSong(_ song: String) {
         if let index = songOrder.firstIndex(of: song) {
+            isLoading = true // Start loading
             songOrder.remove(at: index)
             updateFirestore()
         }
@@ -115,6 +133,7 @@ struct SongView: View {
 
     // Move a Song in the List
     private func moveSong(from source: IndexSet, to destination: Int) {
+        isLoading = true // Start loading
         songOrder.move(fromOffsets: source, toOffset: destination)
         updateFirestore()
     }
@@ -122,6 +141,7 @@ struct SongView: View {
     // Update Firestore
     private func updateFirestore() {
         db.collection("weekly_set").document(currentWeekID).setData(["song_order": songOrder], merge: true) { error in
+            isLoading = false // Stop loading after the update
             if let error = error {
                 self.errorMessage = "Error updating song order: \(error.localizedDescription)"
             }
@@ -130,7 +150,9 @@ struct SongView: View {
 
     // Fetch Access Token
     private func fetchAccessToken(completion: @escaping () -> Void) {
+        isLoading = true // Start loading
         generateAccessToken { token in
+            defer { isLoading = false } // Stop loading after the token fetch
             guard let token = token else {
                 self.errorMessage = "Failed to generate access token."
                 return
@@ -148,21 +170,47 @@ struct SongPickerView: View {
     var onSelect: (GDriveFile) -> Void
 
     @State private var fetchedFiles: [GDriveFile] = []
+    @State private var nextPageToken: String? = nil // Track pagination
+    @State private var isLoading = false // Loading state
 
     var body: some View {
         NavigationView {
-            VStack {
-                if fetchedFiles.isEmpty {
-                    Text("No songs available.")
-                        .foregroundColor(.gray)
-                        .padding()
-                } else {
-                    List(fetchedFiles, id: \.id) { song in
-                        Button(action: {
-                            onSelect(song)
-                        }) {
-                            Text(song.name)
+            ZStack {
+                VStack {
+                    if fetchedFiles.isEmpty && !isLoading {
+                        Text("No songs available.")
+                            .foregroundColor(.gray)
+                            .padding()
+                    } else {
+                        List {
+                            ForEach(fetchedFiles, id: \.id) { song in
+                                Button(action: {
+                                    onSelect(song)
+                                }) {
+                                    Text(song.name)
+                                }
+                            }
+
+                            // Load more button for pagination
+                            if nextPageToken != nil && !isLoading {
+                                Button("Load More") {
+                                    fetchFiles()
+                                }
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding()
+                            }
                         }
+                    }
+                }
+
+                // Loading Indicator
+                if isLoading {
+                    VStack {
+                        ProgressView("Loading...")
+                            .padding()
+                            .background(Color(.systemBackground))
+                            .cornerRadius(10)
+                            .shadow(radius: 5)
                     }
                 }
             }
@@ -179,9 +227,14 @@ struct SongPickerView: View {
     }
 
     private func fetchFiles() {
-        let urlString = "https://www.googleapis.com/drive/v3/files?q='\(folderID)'+in+parents&fields=files(id,name,mimeType)"
+        isLoading = true // Start loading
+        var urlString = "https://www.googleapis.com/drive/v3/files?q='\(folderID)'+in+parents&fields=nextPageToken,files(id,name,mimeType)&orderBy=name"
+        if let token = nextPageToken {
+            urlString += "&pageToken=\(token)"
+        }
         guard let url = URL(string: urlString) else {
             errorMessage = "Invalid URL"
+            isLoading = false
             return
         }
 
@@ -190,28 +243,31 @@ struct SongPickerView: View {
         request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
 
         URLSession.shared.dataTask(with: request) { data, _, error in
+            isLoading = false // Stop loading
             if let error = error {
                 DispatchQueue.main.async {
-                    self.errorMessage = "Error fetching files: \(error.localizedDescription)"
+                    errorMessage = "Error fetching files: \(error.localizedDescription)"
                 }
                 return
             }
 
             guard let data = data else {
                 DispatchQueue.main.async {
-                    self.errorMessage = "No data received."
+                    errorMessage = "No data received."
                 }
                 return
             }
 
             do {
-                let result = try JSONDecoder().decode(GDriveFileList.self, from: data)
+                let result = try JSONDecoder().decode(GDriveFileListWithToken.self, from: data)
                 DispatchQueue.main.async {
-                    fetchedFiles = result.files
+                    fetchedFiles.append(contentsOf: result.files)
+                    fetchedFiles = fetchedFiles.sorted(by: { $0.name.lowercased() < $1.name.lowercased() })
+                    nextPageToken = result.nextPageToken // Update next page token
                 }
             } catch {
                 DispatchQueue.main.async {
-                    self.errorMessage = "Error parsing file data: \(error.localizedDescription)"
+                    errorMessage = "Error parsing file data: \(error.localizedDescription)"
                 }
             }
         }.resume()

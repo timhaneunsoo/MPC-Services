@@ -13,6 +13,9 @@ struct AdminView: View {
             NavigationLink(destination: SongView()) {
                 Label("Manage Songs", systemImage: "music.note.list")
             }
+            NavigationLink(destination: UsersView()) {
+                Label("Manage Users", systemImage: "person")
+            }
         }
         .listStyle(InsetGroupedListStyle())
         .navigationTitle("Admin Panel")
