@@ -1,10 +1,3 @@
-//
-//  SignUpView.swift
-//  MessiahPresbyterianServices
-//
-//  Created by Tim Han on 12/2/24.
-//
-
 import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
@@ -18,6 +11,8 @@ struct SignUpView: View {
     @State private var confirmPassword = ""
     @State private var errorMessage = ""
     @State private var role = "user" // Default role is 'user'
+
+    private let db = Firestore.firestore()
 
     var body: some View {
         VStack(spacing: 20) {
@@ -54,7 +49,7 @@ struct SignUpView: View {
                 .background(Color(.secondarySystemBackground))
                 .cornerRadius(8)
 
-            // Role Selection (Optional: For admin to assign roles while creating accounts)
+            // Role Selection
             Picker("Role", selection: $role) {
                 Text("User").tag("user")
                 Text("Admin").tag("admin")
@@ -70,7 +65,7 @@ struct SignUpView: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.green)
+                    .background(Color.blue)
                     .cornerRadius(8)
             }
 
@@ -109,10 +104,11 @@ struct SignUpView: View {
             "first_name": firstName,
             "last_name": lastName,
             "role": role,
-            "blockout_dates": [],
+            "org_ids": [], // Leave empty for system admin to assign later
+            "blockout_dates": []
         ]
 
-        Firestore.firestore().collection("users").document(userId).setData(userData) { error in
+        db.collection("users").document(userId).setData(userData) { error in
             if let error = error {
                 errorMessage = "Error saving user data: \(error.localizedDescription)"
             } else {

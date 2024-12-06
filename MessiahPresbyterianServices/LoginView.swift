@@ -1,8 +1,5 @@
 //
 //  LoginView.swift
-//  MessiahPresbyterianServices
-//
-//  Created by Tim Han on 12/2/24.
 //
 
 import SwiftUI
@@ -16,6 +13,18 @@ struct LoginView: View {
 
     var body: some View {
         VStack(spacing: 20) {
+            // Welcome Text
+            Text("Welcome to MPC Services")
+                .font(.largeTitle)
+                .bold()
+                .padding(.bottom, 50)
+            
+            // Title
+            Text("Log In")
+                .font(.title)
+                .bold()
+                .padding(.bottom, 20) // Add spacing below the title
+
             // Email Input
             TextField("Email", text: $email)
                 .autocapitalization(.none)
@@ -61,13 +70,28 @@ struct LoginView: View {
             }
         }
         .padding()
-        .navigationTitle("Log In") // Add a title for better navigation context
+        .frame(maxWidth: 400) // Optional: Restrict width for better aesthetics on larger screens
+        .background(Color(.systemBackground))
+        .cornerRadius(10)
     }
 
     private func login() {
         Auth.auth().signIn(withEmail: email, password: password) { result, error in
-            if let error = error {
-                errorMessage = handleFirebaseError(error)
+            if let error = error as NSError? {
+                switch AuthErrorCode(rawValue: error.code) {
+                case .invalidEmail:
+                    errorMessage = "Invalid email address. Please check and try again."
+                case .wrongPassword:
+                    errorMessage = "Incorrect password. Please try again."
+                case .userNotFound:
+                    errorMessage = "No account found with this email. Please sign up first."
+                case .networkError:
+                    errorMessage = "Network error. Please check your internet connection."
+                case .tooManyRequests:
+                    errorMessage = "Too many login attempts. Please wait and try again later."
+                default:
+                    errorMessage = "An unknown error occurred: \(error.localizedDescription)"
+                }
             } else {
                 isLoggedIn = true
             }

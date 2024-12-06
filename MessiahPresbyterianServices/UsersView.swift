@@ -7,6 +7,8 @@ import FirebaseAuth
 import FirebaseFirestore
 
 struct UsersView: View {
+    let orgId: String // Organization ID for filtering users
+
     @State private var users: [User] = []
     @State private var errorMessage = ""
     @State private var isLoading = true
@@ -16,20 +18,21 @@ struct UsersView: View {
         VStack {
             Text("Manage Users")
                 .font(.largeTitle)
+                .bold()
                 .padding()
 
             if isLoading {
                 ProgressView()
                     .padding()
             } else if users.isEmpty {
-                Text("No users found.")
+                Text("No users found for this organization.")
                     .foregroundColor(.gray)
                     .padding()
             } else {
                 List {
                     ForEach(users, id: \.id) { user in
-                        VStack(alignment: .leading) {
-                            // Email (not editable)
+                        VStack(alignment: .leading, spacing: 8) {
+                            // Email (non-editable)
                             HStack {
                                 Text("Email:")
                                     .fontWeight(.bold)
@@ -76,6 +79,7 @@ struct UsersView: View {
                         .padding(.vertical)
                     }
                 }
+                .listStyle(InsetGroupedListStyle())
             }
         }
         .padding()
@@ -85,23 +89,39 @@ struct UsersView: View {
         }
     }
 
-    // Fetch Users from Firestore
+    // MARK: - Firestore Functions
+
+    /// Fetch Users for the Organization
     private func fetchUsers() {
         isLoading = true
         db.collection("users").getDocuments { snapshot, error in
             isLoading = false
             if let error = error {
                 self.errorMessage = "Error fetching users: \(error.localizedDescription)"
+                print("Error fetching users: \(error.localizedDescription)")
                 return
             }
 
             guard let documents = snapshot?.documents else {
                 self.errorMessage = "No users found."
+                print("No documents returned from Firestore.")
                 return
             }
 
+            // Debugging: Print all documents returned
+            print("Documents fetched: \(documents.count)")
+            for document in documents {
+                print("Document ID: \(document.documentID), Data: \(document.data())")
+            }
+
+            // Filter users who belong to the specified organization
             self.users = documents.compactMap { doc -> User? in
                 let data = doc.data()
+                print("Processing user: \(data)")
+                guard let orgIds = data["org_ids"] as? [String], orgIds.contains(self.orgId) else {
+                    print("User does not belong to this organization: \(data)")
+                    return nil
+                }
                 return User(
                     id: doc.documentID,
                     email: data["email"] as? String ?? "N/A",
@@ -110,10 +130,13 @@ struct UsersView: View {
                     role: data["role"] as? String ?? "user"
                 )
             }
+
+            // Debugging: Print filtered users
+            print("Filtered users: \(users)")
         }
     }
 
-    // Update User Field in Firestore
+    /// Update User Field in Firestore
     private func updateUserField(user: User, field: String, value: String) {
         guard let index = users.firstIndex(where: { $0.id == user.id }) else { return }
         users[index].setValue(for: field, value: value)
@@ -126,7 +149,8 @@ struct UsersView: View {
     }
 }
 
-// User Model
+// MARK: - User Model
+
 struct User: Identifiable {
     let id: String
     var email: String

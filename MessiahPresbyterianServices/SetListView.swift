@@ -4,88 +4,147 @@ import FirebaseFirestore
 import PDFKit
 
 struct SetListView: View {
-    @State private var youtubePlaylistURL = ""
+    @State private var selectedDate = Date() // Selected date for the set
+    @State private var youtubePlaylistURL: String = ""
     @State private var songOrder: [String] = []
     @State private var team: [[String: String]] = []
-    @State private var errorMessage = ""
+    @State private var errorMessage: String = ""
     @State private var accessToken: String?
+    @State private var combinedFileURL: URL?
     @State private var isPreviewVisible: Bool = false
-    @State private var combinedFileURL: URL? // URL for the combined PDF file
-    @State private var isLoading: Bool = false // Loading state
+    @State private var isLoading: Bool = false
+    @State private var folderID: String = "" // Google Drive Folder ID from Config
+    @State private var userOrgIds: [String] = [] // Org IDs the user belongs to
+    @State private var userRole: String = "" // User's role
+
+    let orgId: String // Pass the orgId from parent view
 
     private let db = Firestore.firestore()
-    private let currentWeekID = "currentWeekID" // Replace with actual logic to fetch the current week ID
-    private let folderID = "1wOvjYjrYFtKUjArslyV3kcBPymlKddPB" // Your folder ID in Google Drive
 
     var body: some View {
         ZStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    // Select Date Section
+                    HStack {
+                        Text("Select Date")
+                            .font(.headline)
+                        Spacer()
+                        DatePicker("", selection: $selectedDate, displayedComponents: .date)
+                            .datePickerStyle(CompactDatePickerStyle())
+                            .onChange(of: selectedDate) { _ in
+                                fetchSetData()
+                            }
+                    }
+                    
                     // YouTube Playlist Section
                     if !youtubePlaylistURL.isEmpty {
                         VStack(alignment: .leading) {
                             Text("YouTube Playlist")
                                 .font(.headline)
                             WebView(urlString: youtubePlaylistURL)
-                                .frame(height: 300)
+                                .frame(height: 400)
                                 .cornerRadius(8)
                         }
                     }
-
-                    // Song Set Order Section
-                    VStack(alignment: .leading) {
+                    
+                    Divider()
+                        .padding(.horizontal)
+                    
+                    // Song Order Section
+                    VStack(alignment: .center) { // Center the entire VStack
                         Text("Song Order")
                             .font(.headline)
+                            .frame(maxWidth: .infinity, alignment: .center) // Center the header
 
                         if songOrder.isEmpty {
-                            Text("No songs added for this week.")
+                            Text("No songs added for this date.")
                                 .foregroundColor(.gray)
                                 .padding()
+                                .frame(maxWidth: .infinity, alignment: .center) // Center the placeholder text
                         } else {
-                            VStack(alignment: .leading) {
+                            VStack(alignment: .center) { // Center the songs and button
                                 ForEach(songOrder, id: \.self) { song in
                                     Text(song)
                                         .padding(.vertical, 5)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .frame(maxWidth: isIpad() ? 700 : .infinity)
                                         .background(Color(.systemGray6))
                                         .cornerRadius(8)
+                                        .multilineTextAlignment(.center) // Center the song text
                                 }
                                 Button(action: {
-                                    combineAndViewAllSongs()
+                                    if accessToken == nil {
+                                        fetchAccessToken { success in
+                                            if success {
+                                                combineAndViewAllSongs()
+                                            } else {
+                                                errorMessage = "Failed to fetch access token. Please try again."
+                                            }
+                                        }
+                                    } else {
+                                        combineAndViewAllSongs()
+                                    }
                                 }) {
                                     Text("View Music Sheets")
                                         .padding()
-                                        .frame(maxWidth: .infinity)
+                                        .frame(maxWidth: isIpad() ? 700 : .infinity)
                                         .background(Color.blue)
                                         .foregroundColor(.white)
                                         .cornerRadius(8)
                                 }
                             }
+                            .frame(maxWidth: .infinity, alignment: .center) // Center the song list
                         }
                     }
-
-                    // Team Section
-                    VStack(alignment: .leading) {
-                        Text("Team")
-                            .font(.headline)
-
-                        if team.allSatisfy({ $0.isEmpty }) {
-                            Text("No team members added yet.")
-                                .foregroundColor(.gray)
-                                .padding()
+                    .frame(maxWidth: .infinity)
+                    .fullScreenCover(isPresented: $isPreviewVisible) {
+                        if let fileURL = combinedFileURL {
+                            PDFViewer(pdfURL: fileURL)
                         } else {
-                            VStack(alignment: .leading) {
-                                ForEach(team, id: \.self) { member in
-                                    Text("\(member["name"] ?? "Unknown") - \(member["role"] ?? "Unknown Role")")
-                                        .padding(.vertical, 5)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .background(Color(.systemGray6))
-                                        .cornerRadius(8)
+                            VStack {
+                                Text("Failed to load file.")
+                                    .foregroundColor(.red)
+                                Button("Close") {
+                                    isPreviewVisible = false
                                 }
+                                .padding()
+                                .background(Color.blue)
+                                .foregroundColor(.white)
+                                .cornerRadius(8)
                             }
                         }
                     }
+                    
+                    Divider()
+                        .padding(.horizontal)
+                    
+                    // Team Section
+                    VStack(alignment: .center) { // Center the entire VStack
+                        Text("Team")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, alignment: .center) // Center the header
 
+                        if team.isEmpty {
+                            Text("No team members added for this date.")
+                                .foregroundColor(.gray)
+                                .padding()
+                                .frame(maxWidth: .infinity, alignment: .center) // Center the placeholder text
+                        } else {
+                            VStack(alignment: .center) { // Center the team list
+                                ForEach(team, id: \.self) { member in
+                                    Text("\(member["name"] ?? "Unknown") - \(member["role"] ?? "Unknown Role")")
+                                        .padding(.vertical, 5)
+                                        .frame(maxWidth: isIpad() ? 700 : .infinity)
+                                        .background(Color(.systemGray6))
+                                        .cornerRadius(8)
+                                        .multilineTextAlignment(.center) // Center each team member text
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .center) // Center the entire team list
+                        }
+                    }
+                    .frame(maxWidth: .infinity) // Center the entire section
+                    
                     // Error Message
                     if !errorMessage.isEmpty {
                         Text(errorMessage)
@@ -108,10 +167,7 @@ struct SetListView: View {
             }
         }
         .navigationTitle("Set List")
-        .onAppear {
-            fetchAccessToken()
-            fetchSetData()
-        }
+        .onAppear(perform: fetchUserData)
         .sheet(isPresented: $isPreviewVisible) {
             if let fileURL = combinedFileURL {
                 PDFViewer(pdfURL: fileURL)
@@ -121,70 +177,170 @@ struct SetListView: View {
         }
     }
 
-    // Fetch Data from Firestore
-    private func fetchSetData() {
-        db.collection("weekly_set").document(currentWeekID).getDocument { snapshot, error in
+    private func fetchAccessToken(completion: @escaping (Bool) -> Void) {
+        isLoading = true
+        generateAccessToken { token in
+            DispatchQueue.main.async {
+                self.isLoading = false
+                if let token = token {
+                    self.accessToken = token
+                    completion(true) // Successfully fetched the token
+                } else {
+                    self.errorMessage = "Failed to generate access token."
+                    completion(false) // Failed to fetch the token
+                }
+            }
+        }
+    }
+
+    // Fetch User Data
+    private func fetchUserData() {
+        guard let userID = Auth.auth().currentUser?.uid else {
+            errorMessage = "User not authenticated."
+            return
+        }
+
+        isLoading = true
+        db.collection("users").document(userID).getDocument { snapshot, error in
+            defer { isLoading = false }
             if let error = error {
-                self.errorMessage = "Error fetching set data: \(error.localizedDescription)"
+                self.errorMessage = "Error fetching user data: \(error.localizedDescription)"
+                return
+            }
+
+            guard let data = snapshot?.data() else {
+                self.errorMessage = "User data not found."
+                return
+            }
+
+            self.userOrgIds = data["org_ids"] as? [String] ?? []
+            self.userRole = data["role"] as? String ?? ""
+
+            if userOrgIds.contains(orgId) {
+                fetchConfigAndSetData()
+            } else {
+                errorMessage = "Access Denied: You do not belong to this organization."
+            }
+        }
+    }
+
+    // Fetch Configuration and Set Data
+    private func fetchConfigAndSetData() {
+        isLoading = true
+
+        db.collection("organizations").document(orgId).collection("config").document("settings").getDocument { snapshot, error in
+            defer { isLoading = false }
+            if let error = error {
+                self.errorMessage = "Error fetching config: \(error.localizedDescription)"
                 return
             }
 
             if let data = snapshot?.data() {
-                youtubePlaylistURL = data["youtube_playlist_url"] as? String ?? ""
+                youtubePlaylistURL = data["default_playlist_url"] as? String ?? ""
+                folderID = data["google_drive_folder_id"] as? String ?? ""
+                fetchSetData()
+            } else {
+                errorMessage = "Configuration not found."
+            }
+        }
+    }
+
+    // Fetch Set Data for the Selected Date
+    private func fetchSetData() {
+        let documentID = selectedDate.toFirestoreDateString()
+        db.collection("organizations").document(orgId).collection("sets").document(documentID).getDocument { snapshot, error in
+            defer { isLoading = false }
+            if let data = snapshot?.data() {
+                // Check for youtube_playlist_url in the set document
+                if let playlistURL = data["youtube_playlist_url"] as? String, !playlistURL.isEmpty {
+                    youtubePlaylistURL = playlistURL
+                } else {
+                    // If not found, use the default playlist URL from the config
+                    fetchDefaultPlaylistURL()
+                }
                 songOrder = data["song_order"] as? [String] ?? []
                 team = data["team"] as? [[String: String]] ?? []
+            } else {
+                // If the set document doesn't exist, use the default playlist URL
+                fetchDefaultPlaylistURL()
+                songOrder = []
+                team = []
             }
         }
     }
 
-    // Fetch Access Token for Google Drive
-    private func fetchAccessToken() {
-        generateAccessToken { token in
-            guard let token = token else {
-                self.errorMessage = "Failed to generate access token."
+    // Fetch Default Playlist URL from Configuration
+    private func fetchDefaultPlaylistURL() {
+        db.collection("organizations").document(orgId).collection("config").document("settings").getDocument { snapshot, error in
+            if let error = error {
+                self.errorMessage = "Error fetching default playlist URL: \(error.localizedDescription)"
                 return
             }
-            self.accessToken = token
-            print("Access token successfully fetched.")
+
+            if let data = snapshot?.data() {
+                youtubePlaylistURL = data["default_playlist_url"] as? String ?? ""
+            } else {
+                self.errorMessage = "Default playlist URL not found in configuration."
+            }
         }
     }
 
-    // Combine All Songs into One PDF and Preview
+    // Combine and View All Songs
     private func combineAndViewAllSongs() {
-        guard let accessToken = accessToken else {
-            self.errorMessage = "Access token is missing."
-            print("Error: Access token is missing.")
+        guard !folderID.isEmpty else {
+            errorMessage = "Google Drive folder ID is missing."
             return
         }
 
-        isLoading = true // Start loading
+        isLoading = true
+        errorMessage = ""
 
         Task {
-            var pdfDocument = PDFDocument()
+            do {
+                let combinedPDF = PDFDocument()
 
-            for song in songOrder {
-                if let fileData = await fetchFileData(for: song) {
-                    if let pdfPage = PDFDocument(data: fileData)?.page(at: 0) {
-                        pdfDocument.insert(pdfPage, at: pdfDocument.pageCount)
+                for song in songOrder {
+                    // Fetch file data for the song
+                    if let fileData = try await fetchFileData(for: song),
+                       let songPDF = PDFDocument(data: fileData) {
+                        // Iterate through all pages of the song PDF
+                        for pageIndex in 0..<songPDF.pageCount {
+                            if let page = songPDF.page(at: pageIndex) {
+                                combinedPDF.insert(page, at: combinedPDF.pageCount)
+                            }
+                        }
+                    } else {
+                        throw NSError(domain: "CombineSongsError", code: 404, userInfo: [
+                            NSLocalizedDescriptionKey: "Failed to fetch file for song: \(song)"
+                        ])
                     }
                 }
+
+                // Save combined PDF to a temporary file
+                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CombinedSongs.pdf")
+                if combinedPDF.write(to: tempURL) {
+                    combinedFileURL = tempURL
+                    isPreviewVisible = true
+                } else {
+                    throw NSError(domain: "CombineSongsError", code: 500, userInfo: [
+                        NSLocalizedDescriptionKey: "Failed to save combined PDF file."
+                    ])
+                }
+            } catch {
+                errorMessage = error.localizedDescription
             }
 
-            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CombinedSongs.pdf")
-            if pdfDocument.write(to: tempURL) {
-                combinedFileURL = tempURL
-                isPreviewVisible = true
-            } else {
-                errorMessage = "Failed to create combined PDF."
-            }
-
-            isLoading = false // Stop loading
+            isLoading = false
         }
     }
 
-    // Fetch File Data for a Song
-    private func fetchFileData(for song: String) async -> Data? {
-        guard let accessToken = accessToken else { return nil }
+    // Fetch File Data Safely
+    private func fetchFileData(for song: String) async throws -> Data? {
+        guard let accessToken = accessToken else {
+            throw NSError(domain: "FetchFileError", code: 401, userInfo: [
+                NSLocalizedDescriptionKey: "Access token is missing."
+            ])
+        }
 
         var allFiles: [GDriveFile] = []
         var nextPageToken: String? = nil
@@ -196,7 +352,11 @@ struct SetListView: View {
                     urlString += "&pageToken=\(nextPageToken)"
                 }
 
-                guard let url = URL(string: urlString) else { return nil }
+                guard let url = URL(string: urlString) else {
+                    throw NSError(domain: "FetchFileError", code: 400, userInfo: [
+                        NSLocalizedDescriptionKey: "Invalid URL for Google Drive API."
+                    ])
+                }
 
                 var request = URLRequest(url: url)
                 request.httpMethod = "GET"
@@ -207,14 +367,20 @@ struct SetListView: View {
                 allFiles.append(contentsOf: result.files)
                 nextPageToken = result.nextPageToken
             } catch {
-                print("Error fetching files: \(error.localizedDescription)")
-                return nil
+                throw NSError(domain: "FetchFileError", code: 500, userInfo: [
+                    NSLocalizedDescriptionKey: "Error fetching file data: \(error.localizedDescription)"
+                ])
             }
         } while nextPageToken != nil
 
+        // Find the matching file by name
         if let file = allFiles.first(where: { $0.name.lowercased().contains(song.lowercased()) }) {
             let urlString = "https://www.googleapis.com/drive/v3/files/\(file.id)/export?mimeType=application/pdf"
-            guard let url = URL(string: urlString) else { return nil }
+            guard let url = URL(string: urlString) else {
+                throw NSError(domain: "FetchFileError", code: 400, userInfo: [
+                    NSLocalizedDescriptionKey: "Invalid URL for exporting Google Drive file."
+                ])
+            }
 
             var request = URLRequest(url: url)
             request.httpMethod = "GET"
@@ -224,12 +390,19 @@ struct SetListView: View {
                 let (data, _) = try await URLSession.shared.data(for: request)
                 return data
             } catch {
-                print("Error downloading file for \(song): \(error.localizedDescription)")
-                return nil
+                throw NSError(domain: "FetchFileError", code: 500, userInfo: [
+                    NSLocalizedDescriptionKey: "Error fetching file data: \(error.localizedDescription)"
+                ])
             }
         } else {
-            print("No file found for song: \(song)")
-            return nil
+            throw NSError(domain: "FetchFileError", code: 404, userInfo: [
+                NSLocalizedDescriptionKey: "File not found for song: \(song)"
+            ])
         }
+    }
+    
+    // Helper function to check if the device is an iPad
+    private func isIpad() -> Bool {
+        return UIDevice.current.userInterfaceIdiom == .pad
     }
 }

@@ -5,16 +5,18 @@
 import SwiftUI
 
 struct AdminView: View {
+    let orgId: String // Organization ID passed from ContentView
+
     var body: some View {
         List {
-            NavigationLink(destination: TeamView()) {
-                Label("Manage Team", systemImage: "person.3.fill")
-            }
-            NavigationLink(destination: SongView()) {
-                Label("Manage Songs", systemImage: "music.note.list")
-            }
-            NavigationLink(destination: UsersView()) {
+            NavigationLink(destination: UsersView(orgId: orgId)) {
                 Label("Manage Users", systemImage: "person")
+            }
+            NavigationLink(destination: ConfigView(orgId: orgId)) {
+                Label("Organization Settings", systemImage: "gearshape")
+            }
+            NavigationLink(destination: ManageSetView(orgId: orgId)) {
+                Label("Manage Set", systemImage: "doc.text.fill")
             }
         }
         .listStyle(InsetGroupedListStyle())

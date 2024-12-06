@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "BB70B7592CFEA6EC00A9D3FB"
-               BuildableName = "MessiahPresbyterianServices.app"
+               BuildableName = "MPC Services.app"
                BlueprintName = "MessiahPresbyterianServices"
                ReferencedContainer = "container:MessiahPresbyterianServices.xcodeproj">
             </BuildableReference>
@@ -69,7 +69,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "BB70B7592CFEA6EC00A9D3FB"
-            BuildableName = "MessiahPresbyterianServices.app"
+            BuildableName = "MPC Services.app"
             BlueprintName = "MessiahPresbyterianServices"
             ReferencedContainer = "container:MessiahPresbyterianServices.xcodeproj">
          </BuildableReference>
@@ -93,7 +93,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "BB70B7592CFEA6EC00A9D3FB"
-            BuildableName = "MessiahPresbyterianServices.app"
+            BuildableName = "MPC Services.app"
             BlueprintName = "MessiahPresbyterianServices"
             ReferencedContainer = "container:MessiahPresbyterianServices.xcodeproj">
          </BuildableReference>

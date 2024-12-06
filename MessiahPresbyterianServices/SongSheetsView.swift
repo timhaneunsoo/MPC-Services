@@ -1,15 +1,19 @@
 import SwiftUI
-import QuickLook
+import FirebaseFirestore
+import FirebaseAuth
 
 struct SongSheetsView: View {
     @State private var files: [GDriveFile] = []
+    @State private var fetchedFileIDs: Set<String> = [] // Track already fetched file IDs
     @State private var errorMessage: String = ""
     @State private var accessToken: String?
     @State private var isPreviewVisible: Bool = false
     @State private var selectedFileURL: URL?
     @State private var isLoading = false // Loading state
+    @State private var folderID: String? // Dynamically fetched Google Drive folder ID
+    let orgId: String // Organization ID passed into this view
 
-    private let folderID = "1wOvjYjrYFtKUjArslyV3kcBPymlKddPB" // Replace with your Google Drive folder ID.
+    private let db = Firestore.firestore()
 
     var body: some View {
         ZStack {
@@ -44,25 +48,20 @@ struct SongSheetsView: View {
             }
             .navigationTitle("Song Sheets")
             .onAppear {
-                isLoading = true // Start loading
-                generateAccessToken { token in
-                    guard let token = token else {
-                        DispatchQueue.main.async {
-                            errorMessage = "Failed to get access token."
-                            isLoading = false
-                        }
-                        return
-                    }
-                    accessToken = token
-                    fetchFiles()
+                if files.isEmpty { // Prevent duplicate fetches if already loaded
+                    isLoading = true // Start loading
+                    fetchedFileIDs = [] // Reset fetched file tracking
+                    files = [] // Clear existing files
+                    fetchConfigAndAccessToken() // Fetch config and access token before loading files
                 }
             }
             .alert(isPresented: .constant(!errorMessage.isEmpty)) {
                 Alert(title: Text("Error"), message: Text(errorMessage), dismissButton: .default(Text("OK")))
             }
-            .sheet(isPresented: $isPreviewVisible) {
+            .fullScreenCover(isPresented: $isPreviewVisible) {
                 if let fileURL = selectedFileURL {
-                    PDFViewer(pdfURL: fileURL) // Updated to use PDFViewer
+                    PDFViewer(pdfURL: fileURL)
+                        .edgesIgnoringSafeArea(.all)
                 } else {
                     Text("Failed to load file.")
                 }
@@ -81,8 +80,39 @@ struct SongSheetsView: View {
         }
     }
 
+    private func fetchConfigAndAccessToken() {
+        // Fetch config from Firestore to get folderID
+        let configDocRef = db.collection("organizations").document(orgId).collection("config").document("settings")
+        
+        configDocRef.getDocument { snapshot, error in
+            if let error = error {
+                self.errorMessage = "Error fetching config: \(error.localizedDescription)"
+                self.isLoading = false
+                return
+            }
+
+            if let data = snapshot?.data() {
+                self.folderID = data["google_drive_folder_id"] as? String ?? ""
+                generateAccessToken { token in
+                    guard let token = token else {
+                        DispatchQueue.main.async {
+                            errorMessage = "Failed to get access token."
+                            isLoading = false
+                        }
+                        return
+                    }
+                    accessToken = token
+                    fetchFiles() // Start fetching files
+                }
+            } else {
+                self.errorMessage = "Config data not found for the organization."
+                self.isLoading = false
+            }
+        }
+    }
+
     private func fetchFiles(pageToken: String? = nil) {
-        guard let accessToken = accessToken else {
+        guard let accessToken = accessToken, let folderID = folderID else {
             isLoading = false
             return
         }
@@ -123,11 +153,16 @@ struct SongSheetsView: View {
             do {
                 let result = try JSONDecoder().decode(GDriveFileListWithToken.self, from: data)
                 DispatchQueue.main.async {
-                    files.append(contentsOf: result.files)
+                    // Filter out duplicates before adding
+                    let newFiles = result.files.filter { !fetchedFileIDs.contains($0.id) }
+                    fetchedFileIDs.formUnion(newFiles.map { $0.id }) // Track fetched IDs
+                    files.append(contentsOf: newFiles) // Append unique files
                     files = files.sorted(by: { $0.name.lowercased() < $1.name.lowercased() })
-                    isLoading = false // Stop loading
+
                     if let nextPageToken = result.nextPageToken {
                         fetchFiles(pageToken: nextPageToken) // Fetch next page if available
+                    } else {
+                        isLoading = false // Stop loading when no more pages
                     }
                 }
             } catch {
@@ -158,25 +193,18 @@ struct SongSheetsView: View {
         request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
 
         URLSession.shared.dataTask(with: request) { data, response, error in
-            isLoading = false // Stop loading
             if let error = error {
                 DispatchQueue.main.async {
                     self.errorMessage = "Error loading file: \(error.localizedDescription)"
+                    self.isLoading = false
                 }
-                print("Error: \(error.localizedDescription)")
                 return
             }
 
-            if let httpResponse = response as? HTTPURLResponse {
-                print("Response Status Code: \(httpResponse.statusCode)")
-                if httpResponse.statusCode == 403 {
-                    print("403 Forbidden: Ensure the service account has access to the file or folder.")
-                }
-            }
-
-            guard let data = data, data.count > 0 else {
+            guard let data = data else {
                 DispatchQueue.main.async {
                     self.errorMessage = "No data received or file is empty."
+                    self.isLoading = false
                 }
                 return
             }
@@ -187,10 +215,12 @@ struct SongSheetsView: View {
                 DispatchQueue.main.async {
                     self.selectedFileURL = tempURL
                     self.isPreviewVisible = true
+                    self.isLoading = false
                 }
             } catch {
                 DispatchQueue.main.async {
                     self.errorMessage = "Error saving file for viewing: \(error.localizedDescription)"
+                    self.isLoading = false
                 }
             }
         }.resume()
@@ -212,10 +242,10 @@ struct SongSheetsView: View {
         request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
 
         URLSession.shared.dataTask(with: request) { data, response, error in
-            isLoading = false // Stop loading
             if let error = error {
                 DispatchQueue.main.async {
                     errorMessage = "Error downloading file: \(error.localizedDescription)"
+                    isLoading = false
                 }
                 return
             }
@@ -223,12 +253,14 @@ struct SongSheetsView: View {
             guard let data = data else {
                 DispatchQueue.main.async {
                     errorMessage = "No data received."
+                    isLoading = false
                 }
                 return
             }
 
             DispatchQueue.main.async {
                 saveToDocumentsDirectory(fileName: file.name, data: data)
+                isLoading = false
             }
         }.resume()
     }
