@@ -56,7 +56,16 @@ struct GoogleDriveHelper {
     }
 
     static func downloadFile(from file: GDriveFile, accessToken: String, completion: @escaping (Result<Data, Error>) -> Void) {
-        let urlString = "https://www.googleapis.com/drive/v3/files/\(file.id)?alt=media"
+        let isGoogleDoc = file.mimeType?.starts(with: "application/vnd.google-apps.") ?? false
+        var urlString: String
+
+        if isGoogleDoc {
+            // Use the export endpoint for Google Docs files
+            urlString = "https://www.googleapis.com/drive/v3/files/\(file.id)/export?mimeType=application/pdf"
+        } else {
+            // Use the alt=media parameter for regular files
+            urlString = "https://www.googleapis.com/drive/v3/files/\(file.id)?alt=media"
+        }
 
         guard let url = URL(string: urlString) else {
             let error = NSError(domain: "GoogleDriveHelper", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid URL for downloading file."])

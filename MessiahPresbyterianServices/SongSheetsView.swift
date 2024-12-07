@@ -139,8 +139,9 @@ struct SongSheetsView: View {
                 self.isLoading = false
                 switch result {
                 case .success(let data):
+                    let fileExtension = "pdf" // Since we're exporting as PDF
+                    let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(file.name).appendingPathExtension(fileExtension)
                     do {
-                        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(file.name).appendingPathExtension("pdf")
                         try data.write(to: tempURL)
                         self.selectedFileURL = tempURL
                         self.isPreviewVisible = true
@@ -175,7 +176,9 @@ struct SongSheetsView: View {
     }
 
     private func saveToDocumentsDirectory(fileName: String, data: Data) {
-        let fileURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent(fileName)
+        let fileURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(fileName)
+            .appendingPathExtension("pdf") // Ensure the .pdf extension is added
 
         do {
             try data.write(to: fileURL)
@@ -184,4 +187,5 @@ struct SongSheetsView: View {
             errorMessage = "Failed to save file: \(error.localizedDescription)"
         }
     }
+
 }
