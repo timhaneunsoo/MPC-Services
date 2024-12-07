@@ -342,7 +342,7 @@ struct MainView: View {
                         .foregroundColor(.white)
                 }
                 .padding()
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: isIpad() ? 400 : .infinity)
                 .background(Color.red)
                 .cornerRadius(8)
             }
@@ -414,6 +414,10 @@ struct MainView: View {
         } catch {
             print("Error signing out: \(error.localizedDescription)")
         }
+    }
+    // Helper function to check if the device is an iPad
+    private func isIpad() -> Bool {
+        return UIDevice.current.userInterfaceIdiom == .pad
     }
 }
 

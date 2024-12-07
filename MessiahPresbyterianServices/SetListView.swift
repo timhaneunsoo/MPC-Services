@@ -207,6 +207,7 @@ struct SetListView: View {
             if let data = snapshot?.data() {
                 youtubePlaylistURL = data["default_playlist_url"] as? String ?? ""
                 folderID = data["google_drive_folder_id"] as? String ?? ""
+                print("Fetched folder ID: \(folderID)") // Debug
                 fetchSetData()
             } else {
                 errorMessage = "Configuration not found."
@@ -222,10 +223,12 @@ struct SetListView: View {
                 youtubePlaylistURL = data["youtube_playlist_url"] as? String ?? ""
                 songOrder = data["song_order"] as? [String] ?? []
                 team = data["team"] as? [[String: String]] ?? []
+                print("Fetched set data: \(data)") // Add this for debugging
             } else {
                 youtubePlaylistURL = ""
                 songOrder = []
                 team = []
+                print("No set data found for \(documentID)") // Add this for debugging
             }
         }
     }
@@ -237,28 +240,54 @@ struct SetListView: View {
         }
 
         isLoading = true
+        errorMessage = ""
+
+        // Step 1: Fetch Access Token
         GoogleDriveHelper.fetchAccessToken { result in
-            switch result {
-            case .success(let token):
-                self.accessToken = token
-                let files = songOrder.map { GDriveFile(id: "", name: $0, mimeType: "application/pdf") }
-                GoogleDriveHelper.generateCombinedPDF(for: files, accessToken: token) { pdfResult in
-                    isLoading = false
-                    switch pdfResult {
-                    case .success(let url):
-                        self.combinedFileURL = url
-                        self.isPreviewVisible = true
-                    case .failure(let error):
-                        self.errorMessage = "Failed to combine songs: \(error.localizedDescription)"
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let token):
+                    self.accessToken = token
+                    
+                    // Step 2: Fetch Files from the Folder
+                    GoogleDriveHelper.fetchFiles(fromFolderID: self.folderID, accessToken: token) { fetchResult in
+                        DispatchQueue.main.async {
+                            switch fetchResult {
+                            case .success(let fetchedFiles):
+                                // Filter fetched files based on `songOrder`
+                                let filesToCombine = fetchedFiles.filter { file in
+                                    self.songOrder.contains { song in
+                                        song.lowercased() == file.name.lowercased()
+                                    }
+                                }
+                                
+                                // Step 3: Generate Combined PDF
+                                GoogleDriveHelper.generateCombinedPDF(for: filesToCombine, accessToken: token) { pdfResult in
+                                    DispatchQueue.main.async {
+                                        self.isLoading = false
+                                        switch pdfResult {
+                                        case .success(let combinedURL):
+                                            self.combinedFileURL = combinedURL
+                                            self.isPreviewVisible = true
+                                        case .failure(let error):
+                                            self.errorMessage = "Failed to generate combined PDF: \(error.localizedDescription)"
+                                        }
+                                    }
+                                }
+                            case .failure(let error):
+                                self.isLoading = false
+                                self.errorMessage = "Error fetching files: \(error.localizedDescription)"
+                            }
+                        }
                     }
+                case .failure(let error):
+                    self.isLoading = false
+                    self.errorMessage = "Failed to fetch access token: \(error.localizedDescription)"
                 }
-            case .failure(let error):
-                isLoading = false
-                errorMessage = "Failed to fetch access token: \(error.localizedDescription)"
             }
         }
     }
-    
+
     private func isIpad() -> Bool {
         return UIDevice.current.userInterfaceIdiom == .pad
     }
