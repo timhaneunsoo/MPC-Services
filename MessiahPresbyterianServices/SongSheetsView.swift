@@ -4,7 +4,6 @@ import FirebaseAuth
 
 struct SongSheetsView: View {
     @State private var files: [GDriveFile] = []
-    @State private var fetchedFileIDs: Set<String> = [] // Track already fetched file IDs
     @State private var errorMessage: String = ""
     @State private var accessToken: String?
     @State private var isPreviewVisible: Bool = false
@@ -49,10 +48,8 @@ struct SongSheetsView: View {
             .navigationTitle("Song Sheets")
             .onAppear {
                 if files.isEmpty { // Prevent duplicate fetches if already loaded
-                    isLoading = true // Start loading
-                    fetchedFileIDs = [] // Reset fetched file tracking
-                    files = [] // Clear existing files
-                    fetchConfigAndAccessToken() // Fetch config and access token before loading files
+                    isLoading = true
+                    fetchConfigAndAccessToken()
                 }
             }
             .alert(isPresented: .constant(!errorMessage.isEmpty)) {
@@ -81,10 +78,7 @@ struct SongSheetsView: View {
     }
 
     private func fetchConfigAndAccessToken() {
-        // Fetch config from Firestore to get folderID
-        let configDocRef = db.collection("organizations").document(orgId).collection("config").document("settings")
-        
-        configDocRef.getDocument { snapshot, error in
+        db.collection("organizations").document(orgId).collection("config").document("settings").getDocument { snapshot, error in
             if let error = error {
                 self.errorMessage = "Error fetching config: \(error.localizedDescription)"
                 self.isLoading = false
@@ -92,17 +86,16 @@ struct SongSheetsView: View {
             }
 
             if let data = snapshot?.data() {
-                self.folderID = data["google_drive_folder_id"] as? String ?? ""
-                generateAccessToken { token in
-                    guard let token = token else {
-                        DispatchQueue.main.async {
-                            errorMessage = "Failed to get access token."
-                            isLoading = false
-                        }
-                        return
+                self.folderID = data["google_drive_folder_id"] as? String
+                GoogleDriveHelper.fetchAccessToken { result in
+                    switch result {
+                    case .success(let token):
+                        self.accessToken = token
+                        fetchFiles()
+                    case .failure(let error):
+                        self.errorMessage = "Failed to fetch access token: \(error.localizedDescription)"
+                        self.isLoading = false
                     }
-                    accessToken = token
-                    fetchFiles() // Start fetching files
                 }
             } else {
                 self.errorMessage = "Config data not found for the organization."
@@ -112,66 +105,26 @@ struct SongSheetsView: View {
     }
 
     private func fetchFiles(pageToken: String? = nil) {
-        guard let accessToken = accessToken, let folderID = folderID else {
-            isLoading = false
+        guard let folderID = folderID, let accessToken = accessToken else {
+            self.errorMessage = "Missing folder ID or access token."
+            self.isLoading = false
             return
         }
 
-        var urlString = "https://www.googleapis.com/drive/v3/files?q='\(folderID)'+in+parents&fields=nextPageToken,files(id,name,mimeType)"
-        if let pageToken = pageToken {
-            urlString += "&pageToken=\(pageToken)"
-        }
-        guard let url = URL(string: urlString) else {
+        isLoading = true
+        GoogleDriveHelper.fetchFiles(fromFolderID: folderID, accessToken: accessToken, pageToken: pageToken) { result in
             DispatchQueue.main.async {
-                errorMessage = "Invalid URL"
-                isLoading = false
+                switch result {
+                case .success(let fetchedFiles):
+                    self.files.append(contentsOf: fetchedFiles)
+                    self.files = self.files.sorted(by: { $0.name.lowercased() < $1.name.lowercased() })
+                    self.isLoading = false
+                case .failure(let error):
+                    self.errorMessage = "Error fetching files: \(error.localizedDescription)"
+                    self.isLoading = false
+                }
             }
-            return
         }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error = error {
-                DispatchQueue.main.async {
-                    errorMessage = "Error fetching files: \(error.localizedDescription)"
-                    isLoading = false
-                }
-                return
-            }
-
-            guard let data = data else {
-                DispatchQueue.main.async {
-                    errorMessage = "No data received."
-                    isLoading = false
-                }
-                return
-            }
-
-            do {
-                let result = try JSONDecoder().decode(GDriveFileListWithToken.self, from: data)
-                DispatchQueue.main.async {
-                    // Filter out duplicates before adding
-                    let newFiles = result.files.filter { !fetchedFileIDs.contains($0.id) }
-                    fetchedFileIDs.formUnion(newFiles.map { $0.id }) // Track fetched IDs
-                    files.append(contentsOf: newFiles) // Append unique files
-                    files = files.sorted(by: { $0.name.lowercased() < $1.name.lowercased() })
-
-                    if let nextPageToken = result.nextPageToken {
-                        fetchFiles(pageToken: nextPageToken) // Fetch next page if available
-                    } else {
-                        isLoading = false // Stop loading when no more pages
-                    }
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    errorMessage = "Error parsing file data: \(error.localizedDescription)"
-                    isLoading = false
-                }
-            }
-        }.resume()
     }
 
     private func viewFile(file: GDriveFile) {
@@ -180,89 +133,45 @@ struct SongSheetsView: View {
             return
         }
 
-        isLoading = true // Start loading
-        let urlString = "https://www.googleapis.com/drive/v3/files/\(file.id)/export?mimeType=application/pdf"
-        guard let url = URL(string: urlString) else {
-            self.errorMessage = "Invalid URL"
-            isLoading = false
-            return
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error = error {
-                DispatchQueue.main.async {
+        isLoading = true
+        GoogleDriveHelper.downloadFile(from: file, accessToken: accessToken) { result in
+            DispatchQueue.main.async {
+                self.isLoading = false
+                switch result {
+                case .success(let data):
+                    do {
+                        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(file.name).appendingPathExtension("pdf")
+                        try data.write(to: tempURL)
+                        self.selectedFileURL = tempURL
+                        self.isPreviewVisible = true
+                    } catch {
+                        self.errorMessage = "Failed to save file: \(error.localizedDescription)"
+                    }
+                case .failure(let error):
                     self.errorMessage = "Error loading file: \(error.localizedDescription)"
-                    self.isLoading = false
-                }
-                return
-            }
-
-            guard let data = data else {
-                DispatchQueue.main.async {
-                    self.errorMessage = "No data received or file is empty."
-                    self.isLoading = false
-                }
-                return
-            }
-
-            do {
-                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(file.name).appendingPathExtension("pdf")
-                try data.write(to: tempURL)
-                DispatchQueue.main.async {
-                    self.selectedFileURL = tempURL
-                    self.isPreviewVisible = true
-                    self.isLoading = false
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.errorMessage = "Error saving file for viewing: \(error.localizedDescription)"
-                    self.isLoading = false
                 }
             }
-        }.resume()
+        }
     }
 
     private func downloadFile(file: GDriveFile) {
-        guard let accessToken = accessToken else { return }
-
-        isLoading = true // Start loading
-        let urlString = "https://www.googleapis.com/drive/v3/files/\(file.id)?alt=media"
-        guard let url = URL(string: urlString) else {
-            errorMessage = "Invalid URL"
-            isLoading = false
+        guard let accessToken = accessToken else {
+            self.errorMessage = "Missing access token."
             return
         }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error = error {
-                DispatchQueue.main.async {
-                    errorMessage = "Error downloading file: \(error.localizedDescription)"
-                    isLoading = false
-                }
-                return
-            }
-
-            guard let data = data else {
-                DispatchQueue.main.async {
-                    errorMessage = "No data received."
-                    isLoading = false
-                }
-                return
-            }
-
+        isLoading = true
+        GoogleDriveHelper.downloadFile(from: file, accessToken: accessToken) { result in
             DispatchQueue.main.async {
-                saveToDocumentsDirectory(fileName: file.name, data: data)
-                isLoading = false
+                self.isLoading = false
+                switch result {
+                case .success(let data):
+                    saveToDocumentsDirectory(fileName: file.name, data: data)
+                case .failure(let error):
+                    self.errorMessage = "Error downloading file: \(error.localizedDescription)"
+                }
             }
-        }.resume()
+        }
     }
 
     private func saveToDocumentsDirectory(fileName: String, data: Data) {

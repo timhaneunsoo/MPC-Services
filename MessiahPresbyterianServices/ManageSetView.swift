@@ -60,13 +60,13 @@ struct ManageSetView: View {
                             .frame(maxWidth: isIpad() ? 700 : .infinity)
                         
                         Button(action: savePlaylistURL) {
-                                Text("Save Changes")
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(Color.blue)
-                                    .foregroundColor(.white)
-                                    .cornerRadius(8)
-                            }
+                            Text("Save Changes")
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.blue)
+                                .foregroundColor(.white)
+                                .cornerRadius(8)
+                        }
                     }
                     .frame(maxWidth: isIpad() ? 700 : .infinity, alignment: .leading)
 
@@ -101,8 +101,16 @@ struct ManageSetView: View {
                         }
 
                         Button(action: {
-                            fetchAccessToken {
-                                isSongPickerVisible = true
+                            GoogleDriveHelper.fetchAccessToken { result in
+                                switch result {
+                                case .success(let token):
+                                    // Access token successfully retrieved
+                                    accessToken = token
+                                    isSongPickerVisible = true
+                                case .failure(let error):
+                                    // Handle the error
+                                    errorMessage = "Failed to fetch access token: \(error.localizedDescription)"
+                                }
                             }
                         }) {
                             Text("Add Song from Song Sheets")
@@ -217,96 +225,51 @@ struct ManageSetView: View {
         db.collection("organizations").document(orgId).collection("config").document("settings").getDocument { snapshot, error in
             defer { isLoading = false }
             if let error = error {
-                self.errorMessage = "Error fetching folder ID: \(error.localizedDescription)"
+                errorMessage = "Error fetching folder ID: \(error.localizedDescription)"
                 return
             }
             if let data = snapshot?.data() {
-                self.folderID = data["google_drive_folder_id"] as? String ?? ""
-                print("Fetched folder ID: \(self.folderID)")
+                folderID = data["google_drive_folder_id"] as? String ?? ""
             } else {
-                self.errorMessage = "Folder ID not found in configuration."
+                errorMessage = "Folder ID not found in configuration."
             }
         }
     }
 
-    // Fetch Set Details for Selected Date
     private func fetchSetDetails() {
         let documentID = selectedDate.toFirestoreDateString()
         db.collection("organizations").document(orgId).collection("sets").document(documentID).getDocument { snapshot, error in
             if let error = error {
-                self.errorMessage = "Error fetching set details: \(error.localizedDescription)"
+                errorMessage = "Error fetching set details: \(error.localizedDescription)"
                 return
             }
-            defer { isLoading = false }
 
             if let data = snapshot?.data() {
-                self.youtubePlaylistURL = data["youtube_playlist_url"] as? String ?? ""
-                self.songOrder = data["song_order"] as? [String] ?? []
-                self.team = data["team"] as? [[String: String]] ?? []
+                youtubePlaylistURL = data["youtube_playlist_url"] as? String ?? ""
+                songOrder = data["song_order"] as? [String] ?? []
+                team = data["team"] as? [[String: String]] ?? []
             } else {
-                // Initialize new set if it doesn't exist
                 createSet(documentID: documentID)
             }
         }
     }
 
-    // Create New Set Document
-    private func createSet(documentID: String) {
-        db.collection("organizations").document(orgId).collection("sets").document(documentID).setData([
-            "date": selectedDate.toFirestoreDateString(),
-            "youtube_playlist_url": "",
-            "song_order": [],
-            "team": []
-        ]) { error in
-            if let error = error {
-                self.errorMessage = "Error creating new set: \(error.localizedDescription)"
-            }
-        }
-    }
-    
-    // Save Playlist URL
-    private func savePlaylistURL() {
-        let documentID = selectedDate.toFirestoreDateString()
-        isLoading = true
-
-        db.collection("organizations").document(orgId).collection("sets").document(documentID).updateData([
-            "youtube_playlist_url": youtubePlaylistURL
-        ]) { error in
-            isLoading = false
-            if let error = error {
-                self.errorMessage = "Error saving playlist URL: \(error.localizedDescription)"
-            } else {
-                print("YouTube playlist URL successfully saved.")
-            }
-        }
-    }
-
-    // Add a Song
     private func addSong(from file: GDriveFile) {
-        guard !file.name.isEmpty else {
-            print("Attempted to add an empty song.")
-            return
-        }
-
-        songOrder.append(file.name) // Append song to list
-        print("Added song: \(file.name)") // Debug log
-        updateSetData() // Save to Firestore
+        guard !file.name.isEmpty else { return }
+        songOrder.append(file.name)
+        updateSetData()
     }
 
-
-    // Remove a Song
     private func removeSong(_ song: String) {
         songOrder.removeAll { $0 == song }
         updateSetData()
     }
 
-    // Move Songs in the List
     private func moveSong(from source: IndexSet, to destination: Int) {
         songOrder.move(fromOffsets: source, toOffset: destination)
         updateSetData()
     }
 
-    // Add Team Member
     private func addTeamMember() {
         guard !selectedUserID.isEmpty, !selectedRole.isEmpty else {
             errorMessage = "Please select a user and a role."
@@ -324,13 +287,25 @@ struct ManageSetView: View {
         }
     }
 
-    // Remove Team Member
     private func removeTeamMember(member: [String: String]) {
         team.removeAll { $0 == member }
         updateSetData()
     }
 
-    // Update Firestore with Set Data
+    private func savePlaylistURL() {
+        let documentID = selectedDate.toFirestoreDateString()
+        isLoading = true
+
+        db.collection("organizations").document(orgId).collection("sets").document(documentID).updateData([
+            "youtube_playlist_url": youtubePlaylistURL
+        ]) { error in
+            isLoading = false
+            if let error = error {
+                errorMessage = "Error saving playlist URL: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func updateSetData() {
         let documentID = selectedDate.toFirestoreDateString()
         db.collection("organizations").document(orgId).collection("sets").document(documentID).setData([
@@ -339,52 +314,47 @@ struct ManageSetView: View {
             "team": team
         ], merge: true) { error in
             if let error = error {
-                self.errorMessage = "Error updating set: \(error.localizedDescription)"
+                errorMessage = "Error updating set: \(error.localizedDescription)"
             }
-        }
-    }
-
-    // Fetch Users in Organization
-    private func fetchUsers() {
-        db.collection("users").whereField("org_ids", arrayContains: orgId).getDocuments { snapshot, error in
-            if let error = error {
-                self.errorMessage = "Error fetching users: \(error.localizedDescription)"
-            }
-
-            if let snapshot = snapshot {
-                self.users = snapshot.documents.map { document in
-                    let data = document.data()
-                    return [
-                        "id": document.documentID,
-                        "name": "\(data["first_name"] as? String ?? "") \(data["last_name"] as? String ?? "")"
-                    ]
-                }
-            }
-        }
-    }
-
-    // Fetch Access Token for Song Picker
-    private func fetchAccessToken(completion: @escaping () -> Void) {
-        isLoading = true
-        generateAccessToken { token in
-            defer { isLoading = false }
-            guard let token = token else {
-                self.errorMessage = "Failed to generate access token."
-                print("Access token generation failed.")
-                return
-            }
-            self.accessToken = token
-            // print("Access token: \(token)")
-            completion()
         }
     }
     
-    // Helper function to check if the device is an iPad
+    // Fetch Users in Organization
+        private func fetchUsers() {
+            db.collection("users").whereField("org_ids", arrayContains: orgId).getDocuments { snapshot, error in
+                if let error = error {
+                    self.errorMessage = "Error fetching users: \(error.localizedDescription)"
+                }
+
+                if let snapshot = snapshot {
+                    self.users = snapshot.documents.map { document in
+                        let data = document.data()
+                        return [
+                            "id": document.documentID,
+                            "name": "\(data["first_name"] as? String ?? "") \(data["last_name"] as? String ?? "")"
+                        ]
+                    }
+                }
+            }
+        }
+
+    private func createSet(documentID: String) {
+        db.collection("organizations").document(orgId).collection("sets").document(documentID).setData([
+            "date": selectedDate.toFirestoreDateString(),
+            "youtube_playlist_url": "",
+            "song_order": [],
+            "team": []
+        ]) { error in
+            if let error = error {
+                errorMessage = "Error creating new set: \(error.localizedDescription)"
+            }
+        }
+    }
+    
     private func isIpad() -> Bool {
         return UIDevice.current.userInterfaceIdiom == .pad
     }
 }
-
 
 struct SongPickerView: View {
     let accessToken: String
