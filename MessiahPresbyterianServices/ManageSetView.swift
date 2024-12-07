@@ -143,9 +143,13 @@ struct ManageSetView: View {
                                             Image(systemName: "trash")
                                                 .foregroundColor(.red)
                                         }
+                                        .buttonStyle(BorderlessButtonStyle())
                                     }
                                 }
                             }
+                            .listStyle(InsetGroupedListStyle())
+                            .environment(\.editMode, .constant(.active)) // Always enable reordering mode
+                            .frame(height: 300)
                         }
 
                         HStack {
