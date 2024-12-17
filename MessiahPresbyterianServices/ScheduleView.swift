@@ -4,12 +4,19 @@ import FirebaseFirestore
 
 struct ScheduleView: View {
     let orgId: String // Organization ID passed to this view
-    @State private var selectedDate = Date()
+    var currentDate: () -> Date = { Date() }
+    @State private var selectedDate: Date
     @State private var blockoutDates: [Date] = [] // List of blockout dates for the current user
     @State private var errorMessage: String = ""
     @State private var isLoading = false // Loading state
 
     private let db = Firestore.firestore()
+    
+    init(orgId: String, currentDate: @escaping () -> Date = { Date() }) {
+        self.orgId = orgId
+        self._selectedDate = State(initialValue: currentDate())
+        self.currentDate = currentDate
+    }
 
     var body: some View {
         VStack {
