@@ -78,6 +78,7 @@ struct ScheduleView: View {
         }
         .navigationTitle("My Schedule")
         .onAppear {
+            selectedDate = Calendar.current.startOfDay(for: currentDate())
             fetchBlockoutDates()
         }
         .alert(isPresented: .constant(!errorMessage.isEmpty)) {
