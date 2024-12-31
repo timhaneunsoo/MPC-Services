@@ -97,19 +97,31 @@ struct SetListView: View {
                             Text("No team members added for this date.")
                                 .foregroundColor(.gray)
                                 .padding()
-                                .frame(maxWidth: .infinity, alignment: .center)
+                                .frame(maxWidth: isIpad() ? 300 : .infinity, alignment: .center)
                         } else {
-                            VStack(alignment: .center) {
-                                ForEach(team, id: \.self) { member in
-                                    Text("\(member["name"] ?? "Unknown") - \(member["role"] ?? "Unknown Role")")
-                                        .padding(.vertical, 5)
-                                        .frame(maxWidth: isIpad() ? 700 : .infinity)
-                                        .background(Color(.systemGray6))
-                                        .cornerRadius(8)
-                                        .multilineTextAlignment(.center)
-                                }
+                            // Table Header
+                            HStack {
+                                Text("Team Member").bold().frame(width: 150, alignment: .leading)
+                                    .padding(.horizontal)
+                                Text("Role").bold().frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.bottom, 10)
+                            .frame(maxWidth: isIpad() ? 300 : .infinity)
+
+                            // Team Table Rows
+                            ForEach(team, id: \.self) { member in
+                                HStack {
+                                    Text(member["name"] ?? "Unknown")
+                                        .frame(width: 150, alignment: .leading)
+                                        .padding(.horizontal)
+                                    Text(member["role"] ?? "Unknown Role")
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .padding(.vertical, 5)
+                                .frame(maxWidth: isIpad() ? 300 : .infinity)
+                                .background(Color(.systemGray6))
+                                .cornerRadius(8)
+                            }
                         }
                     }
 

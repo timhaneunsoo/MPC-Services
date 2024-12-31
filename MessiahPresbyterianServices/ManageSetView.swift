@@ -128,61 +128,50 @@ struct ManageSetView: View {
                         Text("Team")
                             .font(.headline)
 
-                        if team.isEmpty {
-                            Text("No team members assigned for this set.")
-                                .foregroundColor(.gray)
-                        } else {
-                            List {
-                                ForEach(team, id: \.self) { member in
-                                    HStack {
-                                        Text("\(member["name"] ?? "Unknown") - \(member["role"] ?? "Role")")
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                        Button(action: {
-                                            removeTeamMember(member: member)
-                                        }) {
-                                            Image(systemName: "trash")
-                                                .foregroundColor(.red)
-                                        }
-                                        .buttonStyle(BorderlessButtonStyle())
-                                    }
-                                }
-                            }
-                            .listStyle(InsetGroupedListStyle())
-                            .environment(\.editMode, .constant(.active)) // Always enable reordering mode
-                            .frame(height: 300)
-                        }
-
+                        // Table Header
                         HStack {
-                            Picker("Select User", selection: $selectedUserID) {
-                                Text("Select a User").tag("")
-                                ForEach(users, id: \.self) { user in
-                                    Text(user["name"] ?? "Unknown").tag(user["id"] ?? "")
+                            Text("Name").bold().frame(width: 150, alignment: .leading)
+                            ForEach(["AV", "Vox", "Bass", "Drums", "Keys", "Elec"], id: \.self) { role in
+                                Text(role)
+                                    .bold()
+                                    .frame(width: 70, alignment: .center)
+                                    .multilineTextAlignment(.center)
+                            }
+                        }
+                        .padding(.bottom, 10)
+
+                        // User Rows
+                        ForEach(users, id: \.self) { user in
+                            HStack {
+                                // User Name
+                                Text(user["name"] ?? "Unknown")
+                                    .frame(width: 150, alignment: .leading)
+
+                                // Role Checkboxes
+                                ForEach(["AV", "Vox", "Bass", "Drums", "Keys", "Elec"], id: \.self) { role in
+                                    Button(action: {
+                                        toggleRole(for: user, role: role)
+                                    }) {
+                                        Image(systemName: isRoleAssigned(user: user, role: role) ? "checkmark.square" : "square")
+                                            .resizable()
+                                            .frame(width: 20, height: 20)
+                                            .foregroundColor(.blue)
+                                    }
+                                    .frame(width: 70, alignment: .center)
                                 }
                             }
-                            .pickerStyle(MenuPickerStyle())
-
-                            Picker("Select Role", selection: $selectedRole) {
-                                Text("Select a Role").tag("")
-                                Text("Lead").tag("Lead")
-                                Text("Vocal").tag("Vocal")
-                                Text("Keys").tag("Keys")
-                                Text("Bass").tag("Bass")
-                                Text("Elec").tag("Elec")
-                                Text("Drums").tag("Drums")
-                                Text("AV").tag("AV")
-                            }
-                            .pickerStyle(MenuPickerStyle())
                         }
 
-                        Button(action: addTeamMember) {
-                            Text("Add Team Member")
-                                .frame(maxWidth: isIpad() ? 700 : .infinity)
+                        Button(action: saveTeamChanges) {
+                            Text("Save Changes")
+                                .frame(maxWidth: .infinity)
                                 .padding()
                                 .background(Color.blue)
                                 .foregroundColor(.white)
                                 .cornerRadius(8)
                         }
                     }
+                    .padding()
                     .frame(maxWidth: isIpad() ? 700 : .infinity, alignment: .leading)
                 }
                 .frame(maxWidth: isIpad() ? 700 : .infinity, alignment: .leading)
@@ -221,6 +210,22 @@ struct ManageSetView: View {
         .alert(isPresented: .constant(!errorMessage.isEmpty)) {
             Alert(title: Text("Error"), message: Text(errorMessage), dismissButton: .default(Text("OK")))
         }
+    }
+    
+    private func isRoleAssigned(user: [String: String], role: String) -> Bool {
+        return team.contains { $0["id"] == user["id"] && $0["role"] == role }
+    }
+
+    private func toggleRole(for user: [String: String], role: String) {
+        if isRoleAssigned(user: user, role: role) {
+            team.removeAll { $0["id"] == user["id"] && $0["role"] == role }
+        } else {
+            team.append(["id": user["id"] ?? "", "name": user["name"] ?? "", "role": role])
+        }
+    }
+
+    private func saveTeamChanges() {
+        updateSetData() // Call the existing function to save changes
     }
     
     // Pre-fetch Google Drive Folder ID during `onAppear`
