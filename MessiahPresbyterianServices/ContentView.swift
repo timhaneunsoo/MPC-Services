@@ -439,7 +439,7 @@ struct SelectOrganizationView: View {
                 .padding(.bottom)
 
             if orgIds.isEmpty {
-                Text("No organizations found.")
+                Text("No organizations found. Please contact Administrator.")
                     .foregroundColor(.gray)
                     .multilineTextAlignment(.center)
                     .padding()
