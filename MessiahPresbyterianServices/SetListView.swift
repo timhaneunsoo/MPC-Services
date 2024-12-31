@@ -1,7 +1,6 @@
 import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
-import PDFKit
 
 struct SetListView: View {
     @State private var selectedDate = Date()
@@ -10,17 +9,18 @@ struct SetListView: View {
     @State private var team: [[String: String]] = []
     @State private var errorMessage: String = ""
     @State private var accessToken: String?
-    @State private var combinedFileURL: URL?
-    @State private var isPreviewVisible: Bool = false
+    @State private var transposedText: [String: String] = [:] // Preloaded song contents
+    @State private var transpositions: [String: Int] = [:] // Per-song transpositions
     @State private var isLoading: Bool = false
-    @State private var folderID: String = ""
-    @State private var userOrgIds: [String] = []
-    @State private var userRole: String = ""
+    @State private var folderID: String?
+    @State private var isTextViewVisible: Bool = false
+    @State private var currentSongIndex: Int = 0 // Track the current song index
+    @Environment(\.colorScheme) var colorScheme
     
     let orgId: String
-    
+
     private let db = Firestore.firestore()
-    
+
     var body: some View {
         ZStack {
             ScrollView {
@@ -36,7 +36,7 @@ struct SetListView: View {
                                 fetchSetData()
                             }
                     }
-                    
+
                     // YouTube Playlist Section
                     if !youtubePlaylistURL.isEmpty {
                         VStack(alignment: .leading) {
@@ -47,16 +47,16 @@ struct SetListView: View {
                                 .cornerRadius(8)
                         }
                     }
-                    
+
                     Divider()
                         .padding(.horizontal)
-                    
+
                     // Song Order Section
                     VStack(alignment: .center) {
                         Text("Song Order")
                             .font(.headline)
                             .frame(maxWidth: .infinity, alignment: .center)
-                        
+
                         if songOrder.isEmpty {
                             Text("No songs added for this date.")
                                 .foregroundColor(.gray)
@@ -65,53 +65,34 @@ struct SetListView: View {
                         } else {
                             VStack(alignment: .center) {
                                 ForEach(songOrder, id: \.self) { song in
-                                    Text(song)
-                                        .padding(.vertical, 5)
-                                        .frame(maxWidth: isIpad() ? 700 : .infinity)
-                                        .background(Color(.systemGray6))
-                                        .cornerRadius(8)
-                                        .multilineTextAlignment(.center)
-                                }
-                                Button(action: combineAndViewAllSongs) {
-                                    Text("View Music Sheets")
-                                        .padding()
-                                        .frame(maxWidth: isIpad() ? 700 : .infinity)
-                                        .background(Color.blue)
-                                        .foregroundColor(.white)
-                                        .cornerRadius(8)
+                                    Button(action: {
+                                        if let index = songOrder.firstIndex(of: song) {
+                                            currentSongIndex = index
+                                            isTextViewVisible = true
+                                        }
+                                    }) {
+                                        Text(song)
+                                            .padding(.vertical, 5)
+                                            .frame(maxWidth: isIpad() ? 700 : .infinity)
+                                            .background(Color(.systemGray6))
+                                            .cornerRadius(8)
+                                            .multilineTextAlignment(.center)
+                                    }
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .center)
                         }
                     }
-                    .frame(maxWidth: .infinity)
-                    .fullScreenCover(isPresented: $isPreviewVisible) {
-                        if let fileURL = combinedFileURL {
-                            PDFViewer(pdfURL: fileURL)
-                        } else {
-                            VStack {
-                                Text("Failed to load file.")
-                                    .foregroundColor(.red)
-                                Button("Close") {
-                                    isPreviewVisible = false
-                                }
-                                .padding()
-                                .background(Color.blue)
-                                .foregroundColor(.white)
-                                .cornerRadius(8)
-                            }
-                        }
-                    }
-                    
+
                     Divider()
                         .padding(.horizontal)
-                    
+
                     // Team Section
                     VStack(alignment: .center) {
                         Text("Team")
                             .font(.headline)
                             .frame(maxWidth: .infinity, alignment: .center)
-                        
+
                         if team.isEmpty {
                             Text("No team members added for this date.")
                                 .foregroundColor(.gray)
@@ -131,8 +112,7 @@ struct SetListView: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                         }
                     }
-                    .frame(maxWidth: .infinity)
-                    
+
                     // Error Message
                     if !errorMessage.isEmpty {
                         Text(errorMessage)
@@ -142,7 +122,7 @@ struct SetListView: View {
                 }
                 .padding()
             }
-            
+
             // Loading Indicator
             if isLoading {
                 VStack {
@@ -155,188 +135,221 @@ struct SetListView: View {
             }
         }
         .navigationTitle("Set List")
-        .onAppear(perform: fetchUserData)
-        .sheet(isPresented: $isPreviewVisible) {
-            if let fileURL = combinedFileURL {
-                PDFViewer(pdfURL: fileURL)
-            } else {
-                Text("Failed to load file.")
+        .onAppear(perform: fetchConfigAndAccessToken)
+        .fullScreenCover(isPresented: $isTextViewVisible) {
+            VStack {
+                // Header with close button
+                HStack {
+                    Text(songOrder[currentSongIndex])
+                        .font(.title)
+                        .bold()
+                        .padding(.leading, 20)
+
+                    Spacer()
+
+                    Button(action: {
+                        isTextViewVisible = false
+                    }) {
+                        Image(systemName: "xmark.circle")
+                            .font(.title)
+                            .foregroundColor(colorScheme == .dark ? .white.opacity(0.7) : .black.opacity(0.7))
+                    }
+                    .padding(.trailing, 20)
+                }
+                .padding(.top, 20)
+
+                // TabView for swiping through songs
+                TabView(selection: $currentSongIndex) {
+                    ForEach(songOrder.indices, id: \.self) { index in
+                        VStack {
+                            ScrollView {
+                                let text = transposedText[songOrder[index], default: "Loading..."]
+                                let columns = text.components(separatedBy: " || ")
+
+                                HStack(alignment: .top, spacing: 20) {
+                                    if columns.count > 0 {
+                                        Text(columns[0])
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .font(.body)
+                                            .multilineTextAlignment(.leading)
+                                            .layoutPriority(1)
+                                    }
+
+                                    if columns.count > 1 {
+                                        Text(columns[1])
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .font(.body)
+                                            .multilineTextAlignment(.leading)
+                                            .layoutPriority(1)
+                                    }
+                                }
+                                .padding()
+                            }
+
+                            HStack {
+                                Button(action: {
+                                    let currentTranspose = transpositions[songOrder[index], default: 0]
+                                    transpositions[songOrder[index]] = currentTranspose - 1
+                                    updateTransposedText(for: songOrder[index])
+                                }) {
+                                    Image(systemName: "minus.circle")
+                                        .font(.largeTitle)
+                                        .foregroundColor(colorScheme == .dark ? .white.opacity(0.7) : .black.opacity(0.7))
+                                }
+                                .padding(.trailing, 20)
+
+                                Text("Transpose: \(transpositions[songOrder[index], default: 0])")
+                                    .font(.headline)
+                                    .padding(.horizontal, 20)
+
+                                Button(action: {
+                                    let currentTranspose = transpositions[songOrder[index], default: 0]
+                                    transpositions[songOrder[index]] = currentTranspose + 1
+                                    updateTransposedText(for: songOrder[index])
+                                }) {
+                                    Image(systemName: "plus.circle")
+                                        .font(.largeTitle)
+                                        .foregroundColor(colorScheme == .dark ? .white.opacity(0.7) : .black.opacity(0.7))
+                                }
+                            }
+                            .padding(.bottom, 20)
+                            .padding(.horizontal, 20)
+                            .background(Color(.systemGray6))
+                            .cornerRadius(10)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                        }
+                        .tag(index)
+                        .onAppear {
+                            fetchSongFile(for: songOrder[index])
+                        }
+                    }
+                }
+                .tabViewStyle(PageTabViewStyle())
+                .indexViewStyle(PageIndexViewStyle(backgroundDisplayMode: .always))
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(.systemBackground))
+            .ignoresSafeArea()
         }
     }
-    
-    private func fetchUserData() {
-        guard let userID = Auth.auth().currentUser?.uid else {
-            errorMessage = "User not authenticated."
-            return
-        }
-        
-        isLoading = true
-        db.collection("users").document(userID).getDocument { snapshot, error in
-            defer { isLoading = false }
-            if let error = error {
-                self.errorMessage = "Error fetching user data: \(error.localizedDescription)"
-                return
-            }
-            
-            guard let data = snapshot?.data() else {
-                self.errorMessage = "User data not found."
-                return
-            }
-            
-            self.userOrgIds = data["org_ids"] as? [String] ?? []
-            self.userRole = data["role"] as? String ?? ""
-            
-            if userOrgIds.contains(orgId) {
-                fetchConfigAndSetData()
-            } else {
-                errorMessage = "Access Denied: You do not belong to this organization."
-            }
-        }
-    }
-    
-    private func fetchConfigAndSetData() {
-        isLoading = true
+
+    // MARK: - Helper Functions
+
+    private func fetchConfigAndAccessToken() {
         db.collection("organizations").document(orgId).collection("config").document("settings").getDocument { snapshot, error in
-            defer { isLoading = false }
             if let error = error {
                 self.errorMessage = "Error fetching config: \(error.localizedDescription)"
                 return
             }
-            
+
             if let data = snapshot?.data() {
-                youtubePlaylistURL = data["default_playlist_url"] as? String ?? ""
-                folderID = data["google_drive_folder_id"] as? String ?? ""
-                print("Fetched folder ID: \(folderID)") // Debug
-                fetchSetData()
+                self.folderID = data["google_drive_folder_id"] as? String
+                GoogleDriveHelper.fetchAccessToken { result in
+                    switch result {
+                    case .success(let token):
+                        self.accessToken = token
+                    case .failure(let error):
+                        self.errorMessage = "Failed to fetch access token: \(error.localizedDescription)"
+                    }
+                }
             } else {
-                errorMessage = "Configuration not found."
+                self.errorMessage = "Config data not found."
             }
         }
     }
-    
+
     private func fetchSetData() {
         let documentID = selectedDate.toFirestoreDateString()
         db.collection("organizations").document(orgId).collection("sets").document(documentID).getDocument { snapshot, error in
-            defer { isLoading = false }
-            if let data = snapshot?.data() {
-                youtubePlaylistURL = data["youtube_playlist_url"] as? String ?? ""
-                songOrder = data["song_order"] as? [String] ?? []
-                team = data["team"] as? [[String: String]] ?? []
-                print("Fetched set data: \(data)") // Add this for debugging
-            } else {
-                youtubePlaylistURL = ""
-                songOrder = []
-                team = []
-                print("No set data found for \(documentID)") // Add this for debugging
-            }
-        }
-    }
-    
-    private func combineAndViewAllSongs() {
-        guard !folderID.isEmpty else {
-            errorMessage = "Google Drive folder ID is missing."
-            return
-        }
-
-        isLoading = true
-        errorMessage = ""
-
-        GoogleDriveHelper.fetchAccessToken { result in
             DispatchQueue.main.async {
-                switch result {
-                case .success(let token):
-                    self.accessToken = token
-                    let combinedPDF = PDFDocument()
-
-                    // Start processing songs in sequence
-                    self.processSongsSequentially(
-                        songIndex: 0,
-                        combinedPDF: combinedPDF,
-                        accessToken: token
-                    ) { finalResult in
-                        DispatchQueue.main.async {
-                            self.isLoading = false
-                            switch finalResult {
-                            case .success(let finalPDF):
-                                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CombinedSongs.pdf")
-                                if finalPDF.write(to: tempURL) {
-                                    self.combinedFileURL = tempURL
-                                    self.isPreviewVisible = true
-                                } else {
-                                    self.errorMessage = "Failed to save combined PDF file."
-                                }
-                            case .failure(let error):
-                                self.errorMessage = "Failed to combine songs: \(error.localizedDescription)"
-                            }
-                        }
-                    }
-
-                case .failure(let error):
-                    self.errorMessage = "Failed to fetch access token: \(error.localizedDescription)"
-                    self.isLoading = false
+                self.isLoading = false
+                if let error = error {
+                    self.errorMessage = "Error fetching set data: \(error.localizedDescription)"
+                } else if let data = snapshot?.data() {
+                    self.youtubePlaylistURL = data["youtube_playlist_url"] as? String ?? ""
+                    self.songOrder = data["song_order"] as? [String] ?? []
+                    self.team = data["team"] as? [[String: String]] ?? []
+                } else {
+                    self.errorMessage = "No set data found for the selected date."
                 }
             }
         }
     }
 
-    private func processSongsSequentially(
-        songIndex: Int,
-        combinedPDF: PDFDocument,
-        accessToken: String,
-        completion: @escaping (Result<PDFDocument, Error>) -> Void
-    ) {
-        // Stop if all songs are processed
-        if songIndex >= songOrder.count {
-            completion(.success(combinedPDF))
+    private func fetchSongFile(for songName: String) {
+        guard let folderID = folderID, let accessToken = accessToken else {
+            errorMessage = "Folder ID or Access Token is missing."
             return
         }
 
-        let currentSong = songOrder[songIndex]
-
-        // Fetch files for the current song
-        GoogleDriveHelper.fetchFiles(fromFolderID: folderID, accessToken: accessToken) { fetchResult in
+        isLoading = true
+        GoogleDriveHelper.fetchFiles(fromFolderID: folderID, accessToken: accessToken) { result in
             DispatchQueue.main.async {
-                switch fetchResult {
+                self.isLoading = false
+                switch result {
                 case .success(let files):
-                    // Find the file matching the current song name
-                    if let file = files.first(where: { $0.name.lowercased() == currentSong.lowercased() }) {
-                        GoogleDriveHelper.downloadFile(from: file, accessToken: accessToken) { downloadResult in
-                            DispatchQueue.main.async {
-                                switch downloadResult {
-                                case .success(let data):
-                                    if let songPDF = PDFDocument(data: data) {
-                                        // Add all pages of the song PDF to the combined PDF
-                                        for pageIndex in 0..<songPDF.pageCount {
-                                            if let page = songPDF.page(at: pageIndex) {
-                                                combinedPDF.insert(page, at: combinedPDF.pageCount)
-                                            }
-                                        }
-                                    }
-                                    // Process the next song
-                                    self.processSongsSequentially(
-                                        songIndex: songIndex + 1,
-                                        combinedPDF: combinedPDF,
-                                        accessToken: accessToken,
-                                        completion: completion
-                                    )
-                                case .failure(let error):
-                                    completion(.failure(error))
-                                }
-                            }
-                        }
+                    if let file = files.first(where: { $0.name.lowercased() == songName.lowercased() }) {
+                        self.viewFile(file: file, for: songName)
                     } else {
-                        // File not found for the current song, continue with the next song
-                        print("File not found for song: \(currentSong)")
-                        self.processSongsSequentially(
-                            songIndex: songIndex + 1,
-                            combinedPDF: combinedPDF,
-                            accessToken: accessToken,
-                            completion: completion
-                        )
+                        self.errorMessage = "Song not found."
                     }
                 case .failure(let error):
-                    completion(.failure(error))
+                    self.errorMessage = "Error fetching files: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func viewFile(file: GDriveFile, for songName: String) {
+        guard let accessToken = accessToken else {
+            self.errorMessage = "Missing access token."
+            return
+        }
+
+        isLoading = true
+        GoogleDriveHelper.fetchFileAsText(from: file, accessToken: accessToken) { result in
+            DispatchQueue.main.async {
+                self.isLoading = false
+                switch result {
+                case .success(let text):
+                    let transposeSteps = transpositions[songName, default: 0]
+                    self.transposedText[songName] = ChordTransposer.formatAndTransposeSongSheet(text: text, steps: transposeSteps)
+                case .failure(let error):
+                    self.errorMessage = "Error loading file: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func updateTransposedText(for songName: String) {
+        guard let folderID = folderID, let accessToken = accessToken else {
+            errorMessage = "Folder ID or Access Token is missing."
+            return
+        }
+
+        GoogleDriveHelper.fetchFiles(fromFolderID: folderID, accessToken: accessToken) { result in
+            switch result {
+            case .success(let files):
+                if let file = files.first(where: { $0.name.lowercased() == songName.lowercased() }) {
+                    GoogleDriveHelper.fetchFileAsText(from: file, accessToken: accessToken) { textResult in
+                        DispatchQueue.main.async {
+                            switch textResult {
+                            case .success(let text):
+                                let transposeSteps = transpositions[songName, default: 0]
+                                self.transposedText[songName] = ChordTransposer.formatAndTransposeSongSheet(text: text, steps: transposeSteps)
+                            case .failure(let error):
+                                self.errorMessage = "Error updating text: \(error.localizedDescription)"
+                            }
+                        }
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        self.errorMessage = "Song not found."
+                    }
+                }
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    self.errorMessage = "Error fetching files: \(error.localizedDescription)"
                 }
             }
         }
