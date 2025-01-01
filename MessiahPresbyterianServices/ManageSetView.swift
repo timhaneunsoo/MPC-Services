@@ -348,17 +348,38 @@ struct ManageSetView: View {
         }
 
     private func createSet(documentID: String) {
-        db.collection("organizations").document(orgId).collection("sets").document(documentID).setData([
-            "date": selectedDate.toFirestoreDateString(),
-            "youtube_playlist_url": "",
-            "song_order": [],
-            "team": []
-        ]) { error in
-            if let error = error {
-                errorMessage = "Error creating new set: \(error.localizedDescription)"
+        // First fetch the default playlist URL
+        db.collection("organizations")
+            .document(orgId)
+            .collection("config")
+            .document("settings")
+            .getDocument { snapshot, error in
+                if let error = error {
+                    errorMessage = "Error fetching config: \(error.localizedDescription)"
+                    return
+                }
+                
+                // Get the default URL from config
+                let defaultURL = snapshot?.data()?["default_playlist_url"] as? String ?? ""
+                
+                // Create set with the default URL
+                self.db.collection("organizations")
+                    .document(self.orgId)
+                    .collection("sets")
+                    .document(documentID)
+                    .setData([
+                        "date": self.selectedDate.toFirestoreDateString(),
+                        "youtube_playlist_url": defaultURL,  // Use default URL here
+                        "song_order": [],
+                        "team": []
+                    ]) { error in
+                        if let error = error {
+                            self.errorMessage = "Error creating new set: \(error.localizedDescription)"
+                        }
+                    }
             }
-        }
     }
+
     
     private func isIpad() -> Bool {
         return UIDevice.current.userInterfaceIdiom == .pad
